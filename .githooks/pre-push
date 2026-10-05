@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Hook pre-push : build complet (tests + spotless:check) avant d'envoyer au remote.
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+
+echo "▶ ./mvnw verify (tests + vérification du formatage)..."
+if ! ./mvnw -q verify; then
+    echo "✖ Build en échec : push refusé." >&2
+    exit 1
+fi
+
+echo "✔ Pre-push OK"

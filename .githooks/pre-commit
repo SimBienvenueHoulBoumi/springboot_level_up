@@ -1,29 +1,38 @@
 #!/usr/bin/env bash
-# Hook pre-commit : formate les fichiers Java stagés (Prettier via Spotless) puis lance les tests.
+# Hook pre-commit : bloque les commits directs sur main, détecte les secrets,
+# puis formate les fichiers Java stagés (Prettier via Spotless).
+# Les tests sont lancés au pre-push (plus lent).
 # Activation : git config core.hooksPath .githooks
 set -euo pipefail
 
 ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT"
 
-# Fichiers Java stagés (ajoutés/modifiés/renommés)
-STAGED_JAVA="$(git diff --cached --name-only --diff-filter=ACMR -- '*.java')"
+# 1. Pas de commit direct sur les branches protégées (sauf commit initial)
+BRANCH="$(git symbolic-ref --short HEAD 2>/dev/null || echo "")"
+if [[ "$BRANCH" =~ ^(main|master)$ ]] && git rev-parse --verify -q HEAD >/dev/null; then
+    echo "✖ Commit direct sur '$BRANCH' interdit. Crée une branche : git switch -c feat/ma-feature" >&2
+    exit 1
+fi
 
+# 2. Détection de secrets
+if command -v gitleaks >/dev/null 2>&1; then
+    echo "▶ Détection de secrets (gitleaks)..."
+    if ! gitleaks git --pre-commit --staged --redact --no-banner; then
+        echo "✖ Secret détecté : commit refusé." >&2
+        exit 1
+    fi
+else
+    echo "⚠ gitleaks absent, détection de secrets ignorée (brew install gitleaks)." >&2
+fi
+
+# 3. Formatage Prettier des fichiers Java stagés
+STAGED_JAVA="$(git diff --cached --name-only --diff-filter=ACMR -- '*.java')"
 if [ -n "$STAGED_JAVA" ]; then
     echo "▶ Formatage Prettier (Spotless)..."
     ./mvnw -q spotless:apply
     # Re-stage uniquement les fichiers déjà stagés, reformatés
     echo "$STAGED_JAVA" | xargs git add --
-fi
-
-if [ -n "$(find src/test -name '*.java' 2>/dev/null)" ]; then
-    echo "▶ Lancement des tests..."
-    if ! ./mvnw -q test; then
-        echo "✖ Tests en échec : commit refusé." >&2
-        exit 1
-    fi
-else
-    echo "ℹ Aucun test trouvé, étape ignorée."
 fi
 
 echo "✔ Pre-commit OK"
