@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Hook pre-commit : formate les fichiers Java stagés (Prettier via Spotless) puis lance les tests.
+# Activation : git config core.hooksPath .githooks
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+
+# Fichiers Java stagés (ajoutés/modifiés/renommés)
+STAGED_JAVA="$(git diff --cached --name-only --diff-filter=ACMR -- '*.java')"
+
+if [ -n "$STAGED_JAVA" ]; then
+    echo "▶ Formatage Prettier (Spotless)..."
+    ./mvnw -q spotless:apply
+    # Re-stage uniquement les fichiers déjà stagés, reformatés
+    echo "$STAGED_JAVA" | xargs git add --
+fi
+
+if [ -n "$(find src/test -name '*.java' 2>/dev/null)" ]; then
+    echo "▶ Lancement des tests..."
+    if ! ./mvnw -q test; then
+        echo "✖ Tests en échec : commit refusé." >&2
+        exit 1
+    fi
+else
+    echo "ℹ Aucun test trouvé, étape ignorée."
+fi
+
+echo "✔ Pre-commit OK"
